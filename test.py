@@ -1,147 +1,191 @@
-import sys, argparse
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from scipy.spatial.distance import squareform,pdist,cdist
-from numpy.linalg import norm 
+'''
+1.Read pieces of images, which are used to create Mosaic Pic
+2.Calculate Avg RGB 
+3.Grid the target picture
+4.Match the pieces of images with each grid of target picture
+5.Composed and create final mosaic picture
+'''
 
-width, height = 640, 480 
+import sys,os,random,argparse 
+from PIL import Image
+import imghdr
+import numpy as np 
 
-class Boids:
-    def __init__(self,N):
-        # init position
-        # 调用reshape()生成N*2的二维数组
-        # np.random.rand(2*N) 创建一个包含2N个在[0，1]之间的一维数组
-        # 对窗口中心加上10个单位的随机偏移
-        self.pos=[width/2.0,height/2.0]+10*np.random.rand(2*N).reshape(N,2) 
-        angles=2*math.pi*np.random.rand(N)
-        # init velocity
-        # zip将两个列表合并成一个元组的列表
-        self.vel=np.array(list(zip(np.sin(angles),np.cos(angles)))) 
-        self.N=N 
-        self.minDist=25.0  # minimal distance 
-        self.maxRuleVel=0.03 # max magnitude of velocities calculated by "rules"
-        self.maxVel=2.0 # max magnitude of final velocity 
+def getImages(imageDir):
+    #given a directory of images, return a list of Images
+    file=os.listdir(imageDir)
+    images=[]
+    for file in files:
+        filePath=os.path.abspath(os.path.join(imageDir,file))
+        try:
+            #explicit load so we don't run into resource crunch
+            fp=open(filePath,'rb')
+            im=Image.open(fp)
+            images.append(im)
+            im.load()
+            fp.close()
+        except:
+            print('Invalid image: %s' %(filePath))
+    return images  
 
-    def applyBC(self):
-        '''apply boundary conditions'''
-        deltaR=2.0
-        for coord in self.pos:
-            if coord[0]>width+deltaR:
-                coord[0]=-deltaR 
-            if coord[0]< - deltaR:
-                coord[0]=width + deltaR
-            if coord[1]>height + deltaR:
-                coord[1] = - deltaR
-            if coord[1] < - deltaR:
-                coord[1] = height + deltaR
+def getAverageRGB(image):
+    #Given PIL image, return average value of color as (r,g,b)
+    im=np.array(iamge)
+    w,h,d=im.shape #对应RGB图像的三个单位，分别对应R，G，B
+    return tuple(np.average(im.reshape(w*h,d),axis=0))
 
-    def tick(self,frameNum,pts,beak):
-        '''update the simulation by one time step'''
-        # get pairwise distances
-        self.distMatrix=squareform(pdist(self.pos))
-        # apply rules
-        self.vel += self.applyRules()
-        self.limit(self.vel, self.maxVel)
-        self.pos+=self.vel 
-        self.applyBC()
-        # update data
-        pts.set_data(self.pos.reshape(2*self.N)[::2],
-                    self.pos.reshape(2*self.N)[1::2])
-        pts.color=255
-        vec=self.pos + 10*self.vel/self.maxVel 
-        beak.set_data(vec.reshape(2*self.N)[::2], 
-                      vec.reshape(2*self.N)[1::2])
+def getAverageRGBOld(image):
+    # no. of pixels in image
+    npixels=image.size[0]*image.size[1]
+    cols=image.getcolors(npixels)
+     sumRGB = [(x[0]*x[1][0], x[0]*x[1][1], x[0]*x[1][2]) for x in cols]
+     avg=tuple([int(sum(x)/npixels) for x in zip(*sumRGB)])
+     return avg  
 
-    def limitVec(self,vec,maxVal):
-        '''limit magnitude of 2D vevtor'''
-        mag=norm(vec)
-        if mag>maxVal:
-            vec[0], vec[1] = vec[0]*maxVal/mag, vec[1]*maxVal/mag
+def splitImage(image,size):
+    '''
+    given image and dims(rows,cols) returns an m*n list of images
+    '''
+    W,H=image.size[0],image.size[1]
+    m,n=size 
+    w,h=int(W/n),int(H/m)
+    imgs=[]
+    #generate list of dimensions
+    for j in range(m):
+        for i in range(n):
+            #append cropped image
+            imgs.append(image.crop((i*w, j*h, (i+1)*w, (j+1)*h)))
+    return imgs 
 
-    def limit(self,X,maxVal):
-        '''limit magnitude of 2D vectors in array X to maxValue'''
-        for vec in X:
-            self.limitVec(vec,maxVal)
+def getBestMatchIndex(input_avg,avgs):
+    '''
+    return index of best Image match based on RGB value distance
+    '''
+    avg=input_avg
 
-    def applyRules(self):
-        # apply rule 1: separation 
-        D=self.distMatrix<25.0
-        vel=self.pos*D.sum(axis=1).reshape(self.N,1)-D.dot(self.pos)
-        self.limit(vel,self.maxRuleVel)
+    index=0
+    min_index=0
+    min_dist=0
+    for val in avgs:
+        dist=((val[0] - avg[0])*(val[0] - avg[0]) +
+            (val[1] - avg[1])*(val[1] - avg[1]) +
+            (val[2] - avg[2])*(val[2] - avg[2]))
+        if dist<min_dist:
+            min_dist=dist
+            min_index=index 
+        index+=1 
+    return min_index
 
-        D=self.distMatrix<50.0
+def createImageGrid(images,dims):
+    '''
+    Given a list of images and a grid size (m, n), create 
+  a grid of images. 
+  '''
+    m,n=dims
 
-        # apply rule 2: alignment
-        vel2=D.dot(self.vel)
-        self.limit(vel2,self.maxRuleVel)
-        vel+=vel2
+  #sanity check
+    assert m*n==len(images)
 
-        # apply rule 2: cohesion
-        vel3=D.dot(self.pos)-self.pos 
-        self.limit(vel3,self.maxRuleVel)
-        vel+=vel3
+    width=max([img.size[0] for img in images])
+    height=max([img.size[1] for img in images])
 
-        return vel 
+    grid_img=Image.new('RGB',(n*width,m*height))
 
-    def buttonPress(self,event):
-        # left click - add a boid
-        if event.button == 1:
-            self.pos=np.concatenate((self.pos, 
-                                       np.array([[event.xdata, event.ydata]])), 
-                                      axis=0)
-            angles = 2*math.pi*np.random.rand(1)
-            v = np.array(list(zip(np.sin(angles), np.cos(angles))))
-            self.vel = np.concatenate((self.vel, v), axis=0)
-            self.N += 1
-        # right click - scatter
-        elif event.button == 3:
-            # add scattering velocity 
-            self.vel += 0.1*(self.pos - np.array([[event.xdata, event.ydata]]))
+    #paste images
+    for index in range(len(images)):
+        row=int(index/n)
+        col=index-n*row  
+        grid_img.paste(images[index], (col*width, row*height))
+    return grid_img
 
-def tick(frameNum,pts,beak,boids):
-    boids.tick(frameNum,pts,beak)
-    return pts,beak
+
+def createPhotomosaic(target_image,imput_images,grid_size,reuse_images=True):
+    print('splitting input image...')
+    target_images=splitImage(target_image,grid_size)
+    print('finding image matches...')
+    output_images=[]
+    count=0
+    batch_size=int(len(target_images)/10)
+
+    avgs=[]
+    for img in input_images:
+        avgs.append(getAverageRGB(img))
+
+    for img in target_images:
+        avg=getAverageRGB(img)
+        match_index=getBestMatchIndex(avg,avgs)
+        output_images.append(input_images[match_index])
+    if count>0 and batch_size>10 and count%batch_size == 0:
+        print('processed %d of %d...' %(count,len(target_images)))
+    count+=1
+    if not reuse_images:
+        input_images.remove(match)
+
+    print('creating mosaic...')
+    mosaic_image=createImageGrid(output_images,grid_size)
+
+    return mosaic_image
 
 def main():
-    print('starting boids...')
+    parser = argparse.ArgumentParser(description='Creates a photomosaic from input images')
 
-    parser = argparse.ArgumentParser(description="Implementing Craig Reynold's Boids...")
-    parser.add_argument('--num-boids', dest='N', required=False)
-    args = parser.parse_args()
+    parser.add_argument('--target-image', dest='target_image', required=True)
+    parser.add_argument('--input-folder', dest='input_folder', required=True)
+    parser.add_argument('--grid-size', nargs=2, dest='grid_size', required=True)
+    parser.add_argument('--output-file', dest='outfile', required=False)
 
-    N=100
-    if args.N:
-        N=int(args.N)
+    args=parser.parse_args()
 
-    boids = Boids(N)
+    #target image
+    target_image=Image.open(args.target_image)
 
-    # setup plot
-    fig=plt.figure()
-    ax = plt.axes(xlim=(0, width), ylim=(0, height))
-    pts, = ax.plot([], [], markersize=10, 
-                  c='k', marker='o', ls='None')
-    beak, = ax.plot([], [], markersize=4, 
-                  c='r', marker='o', ls='None')
-    anim = animation.FuncAnimation(fig, tick, fargs=(pts, beak, boids), 
-                                 interval=50)
+    #input images
+    print('reading input folder...')
+    input_images=getImages(args.input_folder)
 
-    cid=fig.canvas.mpl_connect('button_press_event',boids.buttonPress)
+    #check if any valid input images found
+    if input_images==[]:
+        print('No input images found in %s. Exiting.' % (args.input_folder, ))
+        exit()
 
-    plt.show()
+    random.shuffle(input_images)
+
+    grid_size=(int(args.grid_size[0]),int(args.grid_size[1]))
+
+    output_filename='mosaic.png'
+    if args.outfile:
+        output_filename=args.outfile
+
+    reuse_images=True
+    resize_input=True 
+
+    print('starting photomosaic creation...')
+
+    #if images cannot be reused, ensure m*n <= num_of_images
+    if not reuse_images:
+        if grid_size[0]*grid_size[1]>len(input_images):
+            print('grid size less than number of images')
+            exit()
+
+    if resize_input:
+        print('resizing images...')
+        # for given grid size, compute max dims w,h of tiles
+        dims=(int(target_image.size[0]/grid_size[1]), 
+            int(target_image.size[1]/grid_size[0])) 
+        print('max tile dims:%s' %(dims,))
+        #resize
+        for img in input_images:
+            img.thumbnail(dims)
+
+    mosaic_image=createPhotomosaic(target_image, input_images, grid_size,
+                                   reuse_images)
+    mosaic_image.save(output_filename,'PNG')
+
+    print('saved output to %s' %(output_filename,))
+    print('done')
 
 if __name__=='__main__':
     main() 
-
-
-
-
-
-
-
-
-
 
 
 
