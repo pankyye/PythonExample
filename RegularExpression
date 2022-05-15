@@ -8,3 +8,25 @@
 . 匹配任意单个字符 eg：a.b 匹配 acb,aic,a&c 但不包括行符
 \ 转义字符，把字符改变为原来的意思 eg：\. 表示 . 
 [...] 字符集，相当于在中括号中任选一个 eg: a[bcd] 可以匹配 ab,ac,ad 
+
+* 匹配前一个字符0或无限次 eg: ab*c 匹配 ac,abc,abbc,abbbc 
++ 匹配前一个字符1或无限次 eg: ab+c 匹配 abc,abbc,abbbc
+? 匹配前一个字符0或1次 eg: ab?c 匹配 ac,abc
+{m} 匹配前一个字符m次 eg: ab{3}c 匹配 abbbc
+{m.n} 匹配前一个字符m至n次 eg: ab{1,3}c 匹配 abc,abbc,abbbc
+
+^ 匹配字符串开头 eg: ^abc 匹配abc开头的字符串
+$ 匹配字符串结尾 eg: $abc 匹配abc结尾的字符串
+\A 仅匹配字符串开头 eg: 
+|Z 仅匹配字符串结尾 eg:
+
+(.*?) ()表示括号内的内容作为返回结果，.*?表示匹配任意字符。
+eg: 字符串 xxIxxjshdxxlovexxsffaxxpythonxx 可以通过 xx(.*?)匹配符合这种规则的字符串
+
+re的匹配模式：
+re.I 使匹配对大小写不敏感
+re.L 做本地化识别匹配
+re.M 多行匹配，影响^和$
+re.S 使匹配包括换行在内的所有字符
+re.U 根据Unicode字符集解析字符，这个标志影响 \w,\W,\b,\B 
+re.X 该标志通过给予更灵活的格式，以便将正则表达式写的更易理解
